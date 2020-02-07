@@ -1,0 +1,98 @@
+###
+#
+# Shellies MQTT check / upgrade Home Assistant's Package
+#
+# Miquel Botanch
+# github @miquelbotanch
+# GitHub Repo https://github.com/miquelbotanch/homeassistant_shellies
+###
+
+# Shelly API Reference
+# https://shelly-api-docs.shelly.cloud/#availability-and-announces
+
+#######################
+# UI-LOVELACE EXAMPLE #
+#######################
+#    - type: conditional
+#      conditions:
+#        - entity: sensor.shellies_can_be_updated
+#          state_not: "0"
+#      card:
+#        type: entities
+#        entities:
+#          - sensor.shellies_can_be_updated
+#          - script.mqtt_upgrade_all_shellies
+
+
+homeassistant:
+  customize:
+    script.mqtt_upgrade_all_shellies:
+      friendly_name: Upgrade all Shellies
+
+counter:
+  shellies_can_be_updated:
+    initial: 0
+    step: 1
+
+sensor:
+  - platform: template
+    sensors:
+      shellies_can_be_updated:
+        value_template: "{{ states('counter.shellies_can_be_updated') | int }}"
+        icon_template: mdi:alert
+
+automation:
+  - alias: Check shellies firmware update available everyday at 20
+    initial_state: true
+    trigger:
+      platform: time
+      at: '20:00:00'
+    action:
+      - service: script.mqtt_ask_shellies_firmware_upgrade_available
+
+  - alias: "Notify Shelly Update available"
+    id: 'pnsua'
+    trigger:
+      platform: mqtt
+      topic: shellies/announce
+    condition:
+      condition: template
+      value_template: "{{ trigger.payload_json['new_fw'] == true }}"
+    action:
+#      - service: persistent_notification.create
+#        data:
+#          title: "Update available!"
+#          message: "New version of Shelly released"
+#          notification_id: shellyUpdateAvailable
+
+      - service: counter.increment
+        data:
+          entity_id: counter.shellies_can_be_updated
+
+      - service: notify.telegram
+        data_template:
+          message: "Shelly {{ trigger.payload_json['id'] }} has a firmware upgrade available. IP: {{ trigger.payload_json['ip'] }}"
+
+script:
+  mqtt_ask_shellies_firmware_upgrade_available:
+    sequence:
+      # Init the counter before ask shellies
+      - service: counter.reset
+        data:
+          entity_id: counter.shellies_can_be_updated
+
+      - service: mqtt.publish
+        data_template:
+          payload: "announce"
+          topic: shellies/command
+          retain: false
+  mqtt_upgrade_all_shellies:
+    sequence:
+      - service: mqtt.publish
+        data_template:
+          payload: "update_fw"
+          topic: shellies/command
+          retain: false
+      - service: counter.reset
+        data:
+          entity_id: counter.shellies_can_be_updated
